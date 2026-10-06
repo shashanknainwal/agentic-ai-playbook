@@ -28,21 +28,20 @@ Progress, code drafts, checklists and notes are saved in `localStorage`. Back th
 It is a static site: no build step and no dependencies.
 
 ```bash
-cd course
 python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
-ES modules and Web Workers do not work from `file://`, so serve the folder over HTTP.
+ES modules and Web Workers do not work from `file://`, so serve the repo over HTTP.
 
 ## Deploy
 
-Every option below serves the `course/` folder as-is. There is **no build command**.
+Every option below serves the repo root as-is. There is **no build command**.
 
-- **Vercel**: New Project → import this repo → *Root Directory* `course` → Framework preset *Other* → Deploy.
-- **Netlify**: Add new site → import repo → *Base directory* `course`, *Publish directory* `course`, leave the build command empty.
-- **Cloudflare Pages**: Create project → *Build output directory* `course`, no build command.
-- **GitHub Pages**: copy `course/` into its own repo (or a `gh-pages` branch) and enable Pages on the root.
+- **Vercel**: New Project → import this repo → Framework preset *Other* → Deploy.
+- **Netlify**: Add new site → import repo → leave the build command empty, publish directory `.`.
+- **Cloudflare Pages**: Create project → no build command, build output directory `/`.
+- **GitHub Pages**: Settings → Pages → *Deploy from a branch* → `main` / root (requires a public repo on the free plan).
 
 At runtime the site loads Pyodide from `cdn.jsdelivr.net` and CodeMirror from `cdnjs.cloudflare.com`. If CodeMirror is blocked, the editor falls back to a plain textarea. To self-host Pyodide, add `?pyodide=/path/to/pyodide/` to the URL. The value is remembered for the session.
 
