@@ -97,6 +97,14 @@ class RateLimiter:
     def check(self, user, tier):
         # TODO: validate tier, get/create bucket, consume, update stats
         raise NotImplementedError
+if __name__ == "__main__":
+    t = {"now": 0.0}
+    rl = RateLimiter(clock=lambda: t["now"])
+    burst = [rl.check("alice", "standard") for _ in range(7)]
+    print("standard burst of 7:", burst)
+    t["now"] = 2.0  # 2 seconds later: +2 tokens
+    print("after 2s:", [rl.check("alice", "standard") for _ in range(3)])
+    print(rl.stats)
 `,
         solution: py`
 import time
@@ -139,6 +147,14 @@ class RateLimiter:
         ok = self.buckets[user].consume()
         self.stats["allowed" if ok else "throttled"] += 1
         return ok
+if __name__ == "__main__":
+    t = {"now": 0.0}
+    rl = RateLimiter(clock=lambda: t["now"])
+    burst = [rl.check("alice", "standard") for _ in range(7)]
+    print("standard burst of 7:", burst)
+    t["now"] = 2.0  # 2 seconds later: +2 tokens
+    print("after 2s:", [rl.check("alice", "standard") for _ in range(3)])
+    print(rl.stats)
 `,
         tests: py`
 def _clock():
@@ -212,6 +228,12 @@ class CostTracker:
 
     def remaining(self, user):
         raise NotImplementedError
+if __name__ == "__main__":
+    c = CostTracker(budget_usd=0.10)
+    for i in range(4):
+        cost = c.record("alice", input_tokens=2000, output_tokens=2000)
+        print("request %d: cost %.4f USD, spent %.4f, remaining %.4f" % (i + 1, cost, c.spend["alice"], c.remaining("alice")))
+    print("alerts:", c.alerts)
 `,
         solution: py`
 PRICE_PER_1K = {"input": 0.003, "output": 0.015}
@@ -235,6 +257,12 @@ class CostTracker:
 
     def remaining(self, user):
         return max(0.0, self.budget - self.spend.get(user, 0.0))
+if __name__ == "__main__":
+    c = CostTracker(budget_usd=0.10)
+    for i in range(4):
+        cost = c.record("alice", input_tokens=2000, output_tokens=2000)
+        print("request %d: cost %.4f USD, spent %.4f, remaining %.4f" % (i + 1, cost, c.spend["alice"], c.remaining("alice")))
+    print("alerts:", c.alerts)
 `,
         tests: py`
 def test_cost_math():
@@ -451,6 +479,13 @@ class SignatureVerifier:
 
     def check(self, payload, signature, expect_reject=False):
         raise NotImplementedError
+if __name__ == "__main__":
+    v = SignatureVerifier(b"demo-secret")
+    payload = '{"amount": 10, "to": "alice"}'
+    sig = v.sign(payload)
+    print("signature:", sig[:16] + "...")
+    print("genuine:", v.check(payload, sig))
+    print("tampered:", v.check(payload.replace("10", "9999"), sig, expect_reject=True))
 `,
         solution: py`
 import hashlib
@@ -471,6 +506,13 @@ class SignatureVerifier:
         if ok:
             return "unexpected_accept" if expect_reject else "hmac_ok"
         return "tamper_caught" if expect_reject else "hmac_fail"
+if __name__ == "__main__":
+    v = SignatureVerifier(b"demo-secret")
+    payload = '{"amount": 10, "to": "alice"}'
+    sig = v.sign(payload)
+    print("signature:", sig[:16] + "...")
+    print("genuine:", v.check(payload, sig))
+    print("tampered:", v.check(payload.replace("10", "9999"), sig, expect_reject=True))
 `,
         tests: py`
 import hashlib, hmac as _h

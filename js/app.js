@@ -2,400 +2,462 @@ import { MODULES, LESSONS, lessonById } from './content/index.js';
 import { md, inline } from './md.js';
 import { store } from './store.js';
 import * as py from './py.js';
-import { createEditor } from './editor.js';
+import { createEditor, createViewer } from './editor.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
+const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const main = $('#main');
 const sidebar = $('#sidebar');
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-const TABS = [
-  ['learn', 'Learn'],
-  ['build', 'Build'],
-  ['quiz', 'Quiz'],
-  ['ship', 'Ship'],
-];
+const TABS = [['learn', 'Learn'], ['practice', 'Practice'], ['quiz', 'Quiz'], ['ship', 'Ship']];
 
-// ---------- progress helpers ----------
+// ---------- progress ----------
+const labState = (id) => store.get().labs[id] || {};
+
 function lessonProgress(lesson) {
   const s = store.get();
-  const labs = lesson.labs || [];
-  const labsPassed = labs.filter((l) => s.labs[l.id]?.passed).length;
+  const labsPassed = lesson.labs.filter((l) => labState(l.id).passed).length;
+  const mastered = lesson.labs.filter((l) => labState(l.id).mastered).length;
   const quiz = s.quizzes[lesson.id];
-  const quizDone = !!quiz && quiz.answered === (lesson.quiz || []).length;
-  const units = labs.length + 1;
+  const quizDone = !!quiz && quiz.answered === lesson.quiz.length;
+  const units = lesson.labs.length + 1;
   const doneUnits = labsPassed + (quizDone ? 1 : 0);
   const done = !!s.done[lesson.id] || doneUnits === units;
-  return { labsPassed, labsTotal: labs.length, quizDone, quiz, done, pct: done ? 1 : doneUnits / units };
+  return { labsPassed, labsTotal: lesson.labs.length, mastered, quizDone, quiz, done, started: doneUnits > 0 };
 }
 
 function courseProgress() {
-  const done = LESSONS.filter((l) => lessonProgress(l).done).length;
-  const labsTotal = LESSONS.reduce((n, l) => n + (l.labs?.length || 0), 0);
-  const labsPassed = LESSONS.reduce((n, l) => n + lessonProgress(l).labsPassed, 0);
-  return { done, total: LESSONS.length, labsPassed, labsTotal, pct: LESSONS.length ? done / LESSONS.length : 0 };
+  let done = 0, labsPassed = 0, labsTotal = 0, mastered = 0;
+  for (const l of LESSONS) {
+    const p = lessonProgress(l);
+    done += p.done; labsPassed += p.labsPassed; labsTotal += p.labsTotal; mastered += p.mastered;
+  }
+  return { done, total: LESSONS.length, labsPassed, labsTotal, mastered };
 }
 
-function checkMark(lesson) {
+const stateDot = (lesson) => {
   const p = lessonProgress(lesson);
-  if (p.done) return '<span class="check done" aria-label="complete">✓</span>';
-  if (p.pct > 0) return '<span class="check partial" aria-label="in progress">•</span>';
-  return '<span class="check" aria-label="not started"></span>';
-}
+  return `<span class="dot-state ${p.done ? 'done' : p.started ? 'partial' : ''}" aria-hidden="true"></span>`;
+};
 
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
   t.classList.add('show');
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove('show'), 2600);
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.remove('show'), 2400);
 }
 
 // ---------- shell ----------
-function renderSidebar(route) {
-  const currentId = route.view === 'lesson' ? route.id : null;
+const openModules = new Set();
+let shellModule = null;
+
+function renderShell(route) {
+  const current = route.view === 'lesson' ? lessonById(route.id) : null;
+  if (current && current.module.id !== shellModule) {
+    // Entering a different module: collapse the rest so the sidebar stays short.
+    shellModule = current.module.id;
+    openModules.clear();
+    openModules.add(shellModule);
+  }
+  if (!openModules.size) {
+    const next = LESSONS.find((l) => !lessonProgress(l).done) || LESSONS[0];
+    openModules.add(next.module.id);
+  }
   sidebar.innerHTML = `
-    <a class="side-link ${route.view === 'home' ? 'active' : ''}" href="#/">⌂ Course home</a>
-    <a class="side-link ${route.view === 'playground' ? 'active' : ''}" href="#/playground">▶ Python playground</a>
-    <a class="side-link ${route.view === 'progress' ? 'active' : ''}" href="#/progress">◎ Progress & data</a>
     ${MODULES.map((m) => {
       const done = m.lessons.filter((l) => lessonProgress(l).done).length;
       return `
-      <div class="side-module">
-        <div class="side-module-head"><span>M${m.num} · ${esc(m.title)}</span><span>${done}/${m.lessons.length}</span></div>
-        ${m.lessons.map((l) => `
-          <a class="side-lesson ${l.id === currentId ? 'active' : ''}" href="#/l/${l.id}">
-            ${checkMark(l)}<span><span class="muted">${l.num}.</span> ${esc(l.title)}</span>
-          </a>`).join('')}
+      <div class="nav-mod ${openModules.has(m.id) ? 'open' : ''}" data-mod="${m.id}">
+        <button class="nav-mod-btn" aria-expanded="${openModules.has(m.id)}">
+          <svg class="chev" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3l5 5-5 5z"/></svg>
+          <span class="name">${esc(m.title)}</span><span class="count">${done}/${m.lessons.length}</span>
+        </button>
+        <div class="nav-lessons">
+          ${m.lessons.map((l) => `<a class="nav-lesson ${current?.id === l.id ? 'active' : ''}" href="#/l/${l.id}">${stateDot(l)}<span>${l.num}. ${esc(l.title)}</span></a>`).join('')}
+        </div>
       </div>`;
     }).join('')}
-  `;
+    <div class="nav-foot">
+      <a href="#/playground" class="${route.view === 'playground' ? 'active' : ''}">Playground</a>
+      <a href="#/progress" class="${route.view === 'progress' ? 'active' : ''}">Progress & backup</a>
+    </div>`;
+  $$('.nav-mod-btn', sidebar).forEach((b) => b.addEventListener('click', () => {
+    const mod = b.parentElement;
+    const id = mod.dataset.mod;
+    openModules.has(id) ? openModules.delete(id) : openModules.add(id);
+    mod.classList.toggle('open');
+    b.setAttribute('aria-expanded', mod.classList.contains('open'));
+  }));
   const cp = courseProgress();
-  $('#progressPill').textContent = `${cp.done}/${cp.total} lessons · ${Math.round(cp.pct * 100)}%`;
+  $('#topProgress').innerHTML = `<span>${cp.done} of ${cp.total} lessons</span><div class="bar"><span style="width:${(cp.done / cp.total) * 100}%"></span></div>`;
 }
 
-py.onStatus((s, detail) => {
-  const el = $('#pyStatus');
-  const labels = { idle: 'Python idle', loading: 'Loading Python…', ready: 'Python ready', busy: 'Running…', error: 'Python failed' };
-  el.querySelector('.dot').className = `dot ${s}`;
-  el.querySelector('.txt').textContent = labels[s] || s;
-  el.title = s === 'error' ? `Could not load Pyodide: ${detail}` : 'In-browser Python (Pyodide)';
-});
-
 const themeBtn = $('#themeBtn');
-const paintThemeBtn = () => {
+const paintTheme = () => {
   const dark = (document.documentElement.dataset.theme || 'dark') === 'dark';
   themeBtn.textContent = dark ? '☀' : '☾';
-  themeBtn.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
+  themeBtn.title = dark ? 'Light theme' : 'Dark theme';
 };
-paintThemeBtn();
+paintTheme();
 themeBtn.addEventListener('click', () => {
   const next = (document.documentElement.dataset.theme || 'dark') === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
   store.update((s) => { s.theme = next; });
-  paintThemeBtn();
+  paintTheme();
 });
+const closeNav = () => document.body.classList.remove('nav-open');
 $('#menuBtn').addEventListener('click', () => document.body.classList.toggle('nav-open'));
-sidebar.addEventListener('click', (e) => { if (e.target.closest('a')) document.body.classList.remove('nav-open'); });
+$('#scrim').addEventListener('click', closeNav);
+sidebar.addEventListener('click', (e) => { if (e.target.closest('a')) closeNav(); });
+
+// Python status shows inside editor toolbars only.
+const PY_LABEL = { idle: 'Python', loading: 'Loading Python…', ready: 'Python ready', busy: 'Running…', error: 'Python failed to load' };
+py.onStatus((s) => $$('.py-state').forEach((el) => {
+  el.className = `py-state ${s}`;
+  el.querySelector('.t').textContent = PY_LABEL[s] || s;
+}));
+const pyStateHTML = () => `<span class="py-state ${py.status}"><span class="d"></span><span class="t">${PY_LABEL[py.status]}</span></span>`;
 
 // ---------- router ----------
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  if (parts[0] === 'l' && lessonById(parts[1])) return { view: 'lesson', id: parts[1], tab: TABS.some((t) => t[0] === parts[2]) ? parts[2] : 'learn' };
+  if (parts[0] === 'l' && lessonById(parts[1])) {
+    let tab = parts[2] === 'build' ? 'practice' : parts[2];
+    if (!TABS.some((t) => t[0] === tab)) tab = 'learn';
+    return { view: 'lesson', id: parts[1], tab, lab: Number(parts[3]) || 0 };
+  }
   if (parts[0] === 'playground') return { view: 'playground' };
   if (parts[0] === 'progress') return { view: 'progress' };
   return { view: 'home' };
 }
 
 let cleanup = [];
-function render() {
+let lastKey = '';
+function render({ keepScroll = false } = {}) {
   cleanup.forEach((fn) => fn());
   cleanup = [];
   const route = parseRoute();
-  renderSidebar(route);
+  renderShell(route);
   if (route.view === 'lesson') renderLesson(route);
   else if (route.view === 'playground') renderPlayground();
   else if (route.view === 'progress') renderProgress();
   else renderHome();
-  window.scrollTo(0, 0);
+  const key = `${route.view}/${route.id}/${route.tab}`;
+  if (!keepScroll && key !== lastKey) window.scrollTo(0, 0);
+  lastKey = key;
 }
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => render());
 
 // ---------- home ----------
-function nextUp() {
+function resumeTarget() {
   const s = store.get();
-  if (s.last && lessonById(s.last.id) && !lessonProgress(lessonById(s.last.id)).done) return s.last;
+  const last = s.last && lessonById(s.last.id);
+  if (last && !lessonProgress(last).done) return { lesson: last, tab: s.last.tab };
   const l = LESSONS.find((x) => !lessonProgress(x).done);
-  return l ? { id: l.id, tab: 'learn' } : null;
+  return l ? { lesson: l, tab: 'learn' } : null;
 }
 
 function renderHome() {
   const cp = courseProgress();
-  const up = nextUp();
-  const upLesson = up && lessonById(up.id);
+  const r = resumeTarget();
   main.innerHTML = `
   <div class="page">
     <section class="hero">
-      <div class="eyebrow">Personal course · ${LESSONS.length} lessons · ${MODULES.length} modules</div>
-      <h1>Build <span class="grad">production AI agents</span>, one runnable lesson at a time.</h1>
-      <p class="lede">Each lesson pairs the concepts with labs you code and test right here in the browser. Python runs locally on your machine through Pyodide, so there is nothing to install.</p>
+      <h1>Learn to build production AI agents by writing the code yourself.</h1>
+      <p class="lede">${LESSONS.length} lessons. For each one, read the concept, study a worked answer, then rewrite it from memory while tests check your work. Python runs right in your browser.</p>
     </section>
+    ${r ? `
+    <div class="resume">
+      <div><div class="label">${cp.done ? 'Continue where you left off' : 'Start here'}</div><h3>${r.lesson.num}. ${esc(r.lesson.title)}</h3></div>
+      <a class="btn primary lg" href="#/l/${r.lesson.id}/${r.tab}">${cp.done || store.get().last ? 'Continue' : 'Start lesson 1'} →</a>
+    </div>` : '<div class="callout ok"><b>Course complete.</b> Revisit any lab and recall it again to keep it fresh.</div>'}
+    <p class="stats-line"><b>${cp.done}</b>/${cp.total} lessons · <b>${cp.labsPassed}</b>/${cp.labsTotal} labs passed · <b>${cp.mastered}</b> recalled with no peeks</p>
 
-    ${upLesson ? `
-    <div class="card continue">
-      <div>
-        <div class="eyebrow">${cp.done ? 'Continue' : 'Start here'}</div>
-        <h3 style="margin:4px 0 2px">Lesson ${upLesson.num}: ${esc(upLesson.title)}</h3>
-        <div class="muted">${esc(upLesson.module.title)} · ~${upLesson.minutes} min · ${upLesson.labs.length} lab${upLesson.labs.length === 1 ? '' : 's'}</div>
-      </div>
-      <a class="btn primary" href="#/l/${upLesson.id}/${up.tab || 'learn'}">${cp.done ? 'Resume' : 'Start lesson 1'} →</a>
-    </div>` : `<div class="callout ok"><b>Course complete.</b> Every lesson is done. Revisit any lab to practise again.</div>`}
-
-    <div class="stats">
-      <div class="stat"><b>${cp.done}/${cp.total}</b><span>lessons complete</span></div>
-      <div class="stat"><b>${cp.labsPassed}/${cp.labsTotal}</b><span>labs passing</span></div>
-      <div class="stat"><b>${Math.round(cp.pct * 100)}%</b><span>course progress</span></div>
-      <div class="stat"><b>~${Math.round(LESSONS.reduce((n, l) => n + l.minutes, 0) / 60)}h</b><span>total hands-on time</span></div>
-    </div>
-
-    <h2>The path</h2>
-    <div class="grid grid-2">
-      ${MODULES.map((m) => {
-        const done = m.lessons.filter((l) => lessonProgress(l).done).length;
-        return `
-        <div class="card module-card">
-          <div class="eyebrow">Module ${m.num}</div>
-          <h3>${esc(m.title)}</h3>
-          <div class="muted" style="font-size:14px">${esc(m.blurb)}</div>
-          <div class="progress"><span style="width:${(done / m.lessons.length) * 100}%"></span></div>
-          <ol>${m.lessons.map((l) => `<li><a href="#/l/${l.id}">${checkMark(l)}<span><span class="muted">${l.num}.</span> ${esc(l.title)}</span></a></li>`).join('')}</ol>
-        </div>`;
-      }).join('')}
-    </div>
-
-    <h2>How each lesson works</h2>
-    <div class="grid grid-2 how">
-      <div class="card"><h3>1 · Learn</h3><p class="muted">The problem, the request flow, core concepts, tradeoffs and real examples. About 10 minutes.</p></div>
-      <div class="card"><h3>2 · Build</h3><p class="muted">Implement the core component in the browser editor and run the tests until they are green. <span class="kbd">Ctrl/⌘ + Enter</span> runs tests.</p></div>
-      <div class="card"><h3>3 · Quiz</h3><p class="muted">Three questions that check the <em>why</em>, not trivia. Each answer explains itself.</p></div>
-      <div class="card"><h3>4 · Ship</h3><p class="muted">Run the full Dockerized reference project locally, tick the production checklist, and keep notes.</p></div>
-    </div>
-    <footer class="foot">Progress is saved in this browser. Back it up from <a href="#/progress">Progress & data</a>.</footer>
+    ${MODULES.map((m) => {
+      const done = m.lessons.filter((l) => lessonProgress(l).done).length;
+      return `
+      <section class="toc-mod">
+        <div class="toc-head"><h2>${m.num}. ${esc(m.title)}</h2><span class="count">${done}/${m.lessons.length}</span></div>
+        <p class="toc-blurb">${esc(m.blurb)}</p>
+        <ul class="toc-list">${m.lessons.map((l) => `
+          <li><a href="#/l/${l.id}"><span class="num">${l.num}</span><span class="t">${esc(l.title)}</span><span class="m">${l.minutes} min</span>${stateDot(l)}</a></li>`).join('')}
+        </ul>
+      </section>`;
+    }).join('')}
   </div>`;
 }
 
 // ---------- lesson ----------
-function renderLesson({ id, tab }) {
-  const lesson = lessonById(id);
-  store.update((s) => { s.last = { id, tab }; });
+function renderLesson(route) {
+  const lesson = lessonById(route.id);
+  store.update((s) => { s.last = { id: lesson.id, tab: route.tab }; });
   const p = lessonProgress(lesson);
-  const idx = LESSONS.indexOf(lesson);
-  const prev = LESSONS[idx - 1];
-  const next = LESSONS[idx + 1];
-  const tabState = {
-    build: p.labsTotal && p.labsPassed === p.labsTotal,
+  const done = {
+    practice: p.labsPassed === p.labsTotal,
     quiz: p.quizDone,
-    ship: !!store.get().done[id],
+    ship: !!store.get().done[lesson.id],
   };
   main.innerHTML = `
-  <div class="page">
-    <div class="lesson-head">
-      <div class="eyebrow">Module ${lesson.module.num} · ${esc(lesson.module.title)}</div>
-      <h1>Lesson ${lesson.num}: ${esc(lesson.title)}</h1>
-      <p class="lede" style="margin:0">${inline(lesson.tagline)}</p>
-      <div class="lesson-meta">
-        <span class="tag">⏱ ~${lesson.minutes} min</span>
-        <span class="tag ${p.labsPassed === p.labsTotal && p.labsTotal ? 'ok' : ''}">🧪 ${p.labsPassed}/${p.labsTotal} labs</span>
-        <span class="tag ${p.quizDone ? 'ok' : ''}">❓ quiz ${p.quizDone ? `${p.quiz.correct}/${lesson.quiz.length}` : 'not taken'}</span>
-        ${p.done ? '<span class="tag ok">✓ complete</span>' : ''}
-        <a class="tag" href="${lesson.repo}" target="_blank" rel="noopener">↗ reference code</a>
-      </div>
-    </div>
-    <nav class="tabs" role="tablist">
-      ${TABS.map(([k, label], i) => `<a role="tab" class="tab ${k === tab ? 'active' : ''}" href="#/l/${id}/${k}"><span class="n">${i + 1}</span>${label}${tabState[k] ? ' <span class="tick">✓</span>' : ''}</a>`).join('')}
+  <div class="page ${route.tab === 'practice' ? 'wide' : ''}">
+    <div class="eyebrow">Module ${lesson.module.num} · ${esc(lesson.module.title)}</div>
+    <h1>${lesson.num}. ${esc(lesson.title)}</h1>
+    <p class="lede">${inline(lesson.tagline)}</p>
+    <div class="meta"><span>~${lesson.minutes} min</span><span class="sep"></span><span>${lesson.labs.length} lab${lesson.labs.length > 1 ? 's' : ''}</span><span class="sep"></span><a href="${lesson.repo}" target="_blank" rel="noopener">reference project ↗</a></div>
+    <nav class="tabs">
+      ${TABS.map(([k, label]) => `<a class="tab ${k === route.tab ? 'active' : ''}" href="#/l/${lesson.id}/${k}">${label}${done[k] ? '<span class="tick">✓</span>' : ''}</a>`).join('')}
     </nav>
     <div id="tabBody"></div>
   </div>`;
   const body = $('#tabBody');
-  if (tab === 'learn') renderLearn(body, lesson, prev, next);
-  if (tab === 'build') renderBuild(body, lesson);
-  if (tab === 'quiz') renderQuiz(body, lesson);
-  if (tab === 'ship') renderShip(body, lesson, next);
+  ({ learn: renderLearn, practice: renderPractice, quiz: renderQuiz, ship: renderShip })[route.tab](body, lesson, route);
 }
 
-function nextBanner(label, title, href, cta = 'Go') {
-  return `<div class="card next-banner"><div><div class="label">${label}</div><b>${title}</b></div><a class="btn primary" href="${href}">${cta} →</a></div>`;
-}
+const nextBlock = (label, title, href, cta) =>
+  `<div class="next"><div><div class="label">${label}</div><b>${title}</b></div><a class="btn primary" href="${href}">${cta} →</a></div>`;
 
-function renderLearn(body, lesson, prev) {
+function renderLearn(body, lesson) {
+  const idx = LESSONS.indexOf(lesson);
+  const prev = LESSONS[idx - 1];
   body.innerHTML = `
     ${md(lesson.summary)}
     <h2>What you'll build</h2>
     <ul class="list-ok">${lesson.build.map((b) => `<li>${inline(b)}</li>`).join('')}</ul>
-    <h2>Why it exists</h2>
-    <div class="callout">${md(lesson.problem)}</div>
-    <h2>Request flow</h2>
-    <div class="flow">${lesson.flow.map(([t, d], i) => `<div class="flow-step"><span class="i">${i + 1}</span><b>${inline(t)}</b><span>${inline(d)}</span></div>`).join('')}</div>
-    ${prev ? `<p class="muted" style="font-size:14px">Builds on <a href="#/l/${prev.id}">Lesson ${prev.num}: ${esc(prev.title)}</a>.</p>` : ''}
+    <h2>Why it matters</h2>
+    <div class="note">${md(lesson.problem)}</div>
+    ${prev ? `<p class="muted small">Builds on <a href="#/l/${prev.id}">Lesson ${prev.num}: ${esc(prev.title)}</a>.</p>` : ''}
+    <h2>How a request flows</h2>
+    <ol class="flow">${lesson.flow.map(([t, d]) => `<li><b>${inline(t)}</b><span>${inline(d)}</span></li>`).join('')}</ol>
     <h2>Core concepts</h2>
-    <div class="grid grid-2">${lesson.concepts.map(([t, d]) => `<div class="card concept"><h3>${inline(t)}</h3><p>${inline(d)}</p></div>`).join('')}</div>
-    <h2>Key insights</h2>
-    <ul>${lesson.insights.map((x) => `<li>${inline(x)}</li>`).join('')}</ul>
-    <h2>Common mistakes</h2>
-    <ul class="list-bad">${lesson.pitfalls.map((x) => `<li>${inline(x)}</li>`).join('')}</ul>
-    <h2>In the real world</h2>
-    <div class="grid grid-2">${lesson.examples.map(([t, d]) => `<div class="card concept"><h3>${inline(t)}</h3><p>${inline(d)}</p></div>`).join('')}</div>
-    ${lesson.extra ? md(lesson.extra) : ''}
-    ${nextBanner('Next action', `Build: ${esc(lesson.labs[0].title)} (~${lesson.labs[0].minutes} min)`, `#/l/${lesson.id}/build`, 'Open the lab')}
+    <dl class="defs">${lesson.concepts.map(([t, d]) => `<div><dt>${inline(t)}</dt><dd>${inline(d)}</dd></div>`).join('')}</dl>
+    <div class="split">
+      <div><h2>Key insights</h2><ul>${lesson.insights.map((x) => `<li>${inline(x)}</li>`).join('')}</ul></div>
+      <div><h2>Common mistakes</h2><ul class="list-bad">${lesson.pitfalls.map((x) => `<li>${inline(x)}</li>`).join('')}</ul></div>
+    </div>
+    <details class="more"><summary>Real-world examples</summary>
+      <dl class="defs">${lesson.examples.map(([t, d]) => `<div><dt>${inline(t)}</dt><dd>${inline(d)}</dd></div>`).join('')}</dl>
+    </details>
+    ${lesson.extra ? `<details class="more"><summary>Going further</summary>${md(lesson.extra)}</details>` : ''}
+    ${nextBlock('Next', `Practice: ${esc(lesson.labs[0].title)}`, `#/l/${lesson.id}/practice`, 'Start practice')}
   `;
 }
 
+// ---------- practice: study → recall ----------
 function renderResult(out, r, kind) {
   if (kind === 'script') {
     out.innerHTML = `
-      <div class="result-head ${r.ok ? 'ok' : 'bad'}">${r.ok ? '▶ Ran' : '✗ Error'} <span class="muted" style="font-weight:400">${r.ms} ms</span></div>
-      ${r.stdout ? `<pre>${esc(r.stdout)}</pre>` : r.ok ? '<pre>(no output: add print() calls)</pre>' : ''}
-      ${r.error ? `<div class="err"><pre>${esc(r.error)}</pre></div>` : ''}`;
+      <div class="res-head ${r.ok ? 'ok' : 'bad'}">${r.ok ? 'Output' : 'Error'} <span class="muted small" style="font-weight:400">· ${r.ms} ms</span></div>
+      ${r.stdout ? `<pre>${esc(r.stdout)}</pre>` : r.ok ? '<pre>(nothing printed)</pre>' : ''}
+      ${r.error ? `<div class="err"><pre>${esc(r.error)}</pre></div>` : ''}
+      ${r.error && /NotImplementedError/.test(r.error) ? '<p class="muted small" style="margin:8px 0 0">A function still raises NotImplementedError. That is the part you need to write.</p>' : ''}`;
     return;
   }
   if (r.load_error) {
-    out.innerHTML = `<div class="result-head bad">✗ Your code failed to load</div><div class="err"><pre>${esc(r.load_error)}</pre></div>${r.stdout ? `<pre>${esc(r.stdout)}</pre>` : ''}`;
+    out.innerHTML = `<div class="res-head bad">Your code didn't load</div><div class="err"><pre>${esc(r.load_error)}</pre></div>`;
     return;
   }
   out.innerHTML = `
-    <div class="result-head ${r.ok ? 'ok' : 'bad'}">${r.ok ? '✓ All tests pass' : '✗ Some tests fail'} · ${r.passed}/${r.total}</div>
+    <div class="res-head ${r.ok ? 'ok' : 'bad'}">${r.ok ? `All ${r.total} tests pass` : `${r.passed} of ${r.total} tests pass`}</div>
     ${r.tests.map((t) => `<div class="test ${t.passed ? 'pass' : 'fail'}"><span class="m">${t.passed ? '✓' : '✗'}</span><span>${esc(t.label)}</span>${t.error ? `<pre>${esc(t.error)}</pre>` : ''}</div>`).join('')}
-    ${r.stdout ? `<details style="margin-top:8px"><summary class="muted">printed output</summary><pre>${esc(r.stdout)}</pre></details>` : ''}`;
+    ${r.stdout ? `<details style="margin-top:8px"><summary class="muted small">Printed output</summary><pre>${esc(r.stdout)}</pre></details>` : ''}`;
 }
 
-function renderBuild(body, lesson) {
-  const s = store.get();
-  body.innerHTML = `
-    <div class="callout"><b>How labs work:</b> edit the code, press <b>Run tests</b> (<span class="kbd">Ctrl/⌘ + Enter</span>). Drafts save automatically. The first run downloads Python (~10 MB, cached afterwards).</div>
-    ${lesson.labs.map((lab, i) => `
-    <section class="lab" data-lab="${lab.id}">
-      <div class="lab-head">
-        <div>
-          <div class="eyebrow">Lab ${i + 1} of ${lesson.labs.length} · ~${lab.minutes} min</div>
-          <h2>${esc(lab.title)}</h2>
-        </div>
-        <span class="tag ${s.labs[lab.id]?.passed ? 'ok' : ''}" data-role="status">${s.labs[lab.id]?.passed ? '✓ passed' : 'not passed yet'}</span>
-      </div>
-      <p>${inline(lab.goal)}</p>
-      <ol class="lab-steps">${lab.steps.map((x) => `<li>${inline(x)}</li>`).join('')}</ol>
-      <div class="editor-wrap">
-        <div class="editor-bar">
-          <span class="file">solution.py</span>
-          <div class="row">
-            <button class="btn small ghost" data-act="hint">💡 Hint <span data-role="hintn"></span></button>
-            <button class="btn small ghost" data-act="reset">↺ Reset</button>
-            <button class="btn small ghost" data-act="solution">👁 Solution</button>
-            <button class="btn small" data-act="run">▶ Run</button>
-            <button class="btn small primary" data-act="test">✓ Run tests</button>
-            <button class="btn small ghost" data-act="stop" hidden>■ Stop</button>
-          </div>
-        </div>
-        <div class="editor-host"></div>
-        <div class="output" aria-live="polite"></div>
-      </div>
-      <div class="hints"></div>
-      <div class="solution" hidden></div>
-    </section>`).join('')}
-    <div id="buildNext"></div>
-  `;
+function setLab(lab, patch) {
+  store.update((s) => { s.labs[lab.id] = { ...(s.labs[lab.id] || {}), ...patch }; });
+}
 
-  const updateNext = () => {
-    const p = lessonProgress(lesson);
-    $('#buildNext').innerHTML = p.labsPassed === p.labsTotal
-      ? nextBanner('All labs passing', 'Next: lock it in with the 3-question quiz', `#/l/${lesson.id}/quiz`, 'Take the quiz')
-      : `<p class="muted" style="margin-top:20px">${p.labsPassed}/${p.labsTotal} labs passing. Next: make the tests above go green.</p>`;
+function renderPractice(body, lesson, route) {
+  const labIdx = Math.min(route.lab, lesson.labs.length - 1);
+  const lab = lesson.labs[labIdx];
+  const st = labState(lab.id);
+  const stage = st.stage || (st.passed ? 'recall' : 'study');
+
+  const switcher = lesson.labs.length > 1 ? `
+    <div class="lab-switch">${lesson.labs.map((l, i) => `
+      <button class="${i === labIdx ? 'active' : ''}" data-lab="${i}">Lab ${i + 1}${labState(l.id).passed ? '<span class="tick">✓</span>' : ''}</button>`).join('')}
+    </div>` : '';
+
+  const stepCls = (s) => {
+    if (s === 'study') return stage === 'study' ? 'active' : 'done';
+    if (s === 'recall') return stage === 'recall' ? (st.passed ? 'done' : 'active') : '';
+    return st.passed ? 'done' : '';
   };
-  updateNext();
 
-  lesson.labs.forEach((lab) => {
-    const section = body.querySelector(`[data-lab="${lab.id}"]`);
-    const out = $('.output', section);
-    const draft = store.get().drafts[lab.id];
-    const editor = createEditor($('.editor-host', section), draft ?? lab.starter.trimStart(), {
-      onChange: (code) => store.update((st) => { st.drafts[lab.id] = code; }),
-      onRunTests: () => act('test'),
-    });
-    cleanup.push(() => editor.destroy());
-    let hintsShown = 0;
-    const hintBtn = $('[data-act="hint"]', section);
-    const updHintBtn = () => {
-      $('[data-role="hintn"]', section).textContent = `${hintsShown}/${lab.hints.length}`;
-      hintBtn.disabled = hintsShown >= lab.hints.length;
-    };
-    updHintBtn();
+  body.innerHTML = `
+    ${switcher}
+    <div class="lab-title">
+      <div>
+        <h2>${esc(lab.title)}</h2>
+        <p class="muted" style="margin:0">${inline(lab.goal)}</p>
+      </div>
+      <div class="row">
+        ${st.mastered ? '<span class="badge ok">Recalled with no peeks</span>' : st.passed ? '<span class="badge ok">Passed</span>' : ''}
+        <span class="badge">~${lab.minutes} min</span>
+      </div>
+    </div>
+    <div class="steps">
+      <span class="step ${stepCls('study')}"><span class="n">${stepCls('study') === 'done' ? '✓' : 1}</span>Study the answer</span>
+      <span class="step-sep"></span>
+      <span class="step ${stepCls('recall')}"><span class="n">${stepCls('recall') === 'done' ? '✓' : 2}</span>Write it from memory</span>
+    </div>
+    <div id="stage"></div>`;
 
-    const setBusy = (busy) => {
-      section.querySelectorAll('[data-act="run"],[data-act="test"]').forEach((b) => { b.disabled = busy; });
-      $('[data-act="stop"]', section).hidden = !busy;
-    };
+  $$('.lab-switch button', body).forEach((b) => b.addEventListener('click', () => {
+    location.hash = `#/l/${lesson.id}/practice/${b.dataset.lab}`;
+  }));
 
-    async function act(kind) {
-      if (kind === 'hint') {
-        if (hintsShown >= lab.hints.length) return;
-        $('.hints', section).insertAdjacentHTML('beforeend', `<div class="callout warn hint"><b>Hint ${hintsShown + 1}:</b> ${inline(lab.hints[hintsShown])}</div>`);
-        hintsShown++;
-        updHintBtn();
-        return;
-      }
-      if (kind === 'reset') {
-        if (!confirm('Replace your code with the starter? Your draft will be lost.')) return;
-        editor.setValue(lab.starter.trimStart());
-        out.innerHTML = '';
-        return;
-      }
-      if (kind === 'solution') {
-        const sol = $('.solution', section);
-        if (sol.hidden) {
-          sol.innerHTML = `<div class="callout warn">Try a hint first. Reading the solution before attempting it teaches a lot less. <button class="btn small" data-act="load-solution">Load into editor</button></div><pre class="code"><code>${esc(lab.solution.trim())}</code></pre>`;
-          $('[data-act="load-solution"]', sol).onclick = () => {
-            if (confirm('Overwrite your editor with the reference solution?')) editor.setValue(lab.solution.trimStart());
-          };
-        }
-        sol.hidden = !sol.hidden;
-        return;
-      }
-      if (kind === 'stop') { py.stop(); return; }
-      setBusy(true);
-      out.innerHTML = `<div class="muted">${py.status === 'ready' ? 'Running…' : 'Starting Python (first run takes a few seconds)…'}</div>`;
-      try {
-        if (kind === 'run') {
-          renderResult(out, await py.runScript(editor.getValue()), 'script');
-        } else {
-          const r = await py.runLab(editor.getValue(), lab.tests);
-          renderResult(out, r, 'lab');
-          const was = store.get().labs[lab.id]?.passed;
-          if (r.ok) {
-            store.update((st) => { st.labs[lab.id] = { passed: true, at: Date.now() }; });
-            const tag = $('[data-role="status"]', section);
-            tag.textContent = '✓ passed';
-            tag.classList.add('ok');
-            if (!was) toast(`Lab passed: ${lab.title} ✓`);
-            renderSidebar(parseRoute());
-            updateNext();
-          }
-        }
-      } catch (err) {
-        out.innerHTML = `<div class="result-head bad">✗ ${esc(err.message)}</div>${py.status === 'error' || /pyodide|load/i.test(err.message) ? '<p class="muted">Python could not load. Check your connection (Pyodide is served from cdn.jsdelivr.net), then try again.</p>' : ''}`;
-      } finally {
-        setBusy(false);
-      }
+  const stageEl = $('#stage');
+  if (stage === 'study') renderStudy(stageEl, lesson, lab, labIdx);
+  else renderRecall(stageEl, lesson, lab, labIdx);
+}
+
+function renderStudy(el, lesson, lab) {
+  const lines = lab.solution.trim().split('\n');
+  const marks = lab.notes.map((n, i) => ({ n: i + 1, line: lines.findIndex((l) => l.includes(n.at)) }));
+  el.innerHTML = `
+    <p class="muted">Read the worked answer slowly. Click a note to jump to its line. When you understand <em>why</em> each line exists, hide the answer and write it yourself.</p>
+    <div class="study">
+      <div class="answer" id="answer"></div>
+      <ol class="notes">${lab.notes.map((n, i) => `<li data-line="${marks[i].line}"><div>${inline(n.note)}<div class="ln-ref">line ${marks[i].line + 1}</div></div></li>`).join('')}</ol>
+    </div>
+    <div class="study-cta">
+      <div><b>Ready?</b> <span class="muted">The answer will be hidden. Peeking later resets your code.</span></div>
+      <div class="row">
+        <button class="btn primary lg" id="ready">Hide the answer and start writing</button>
+      </div>
+    </div>`;
+  const viewer = createViewer($('#answer', el), lines.join('\n'), marks);
+  $$('.notes li', el).forEach((li) => li.addEventListener('click', () => {
+    $$('.notes li', el).forEach((x) => x.classList.remove('focus'));
+    li.classList.add('focus');
+    viewer.focus(Number(li.dataset.line));
+  }));
+  $('#ready', el).onclick = () => {
+    setLab(lab, { stage: 'recall' });
+    store.update((s) => { delete s.drafts[lab.id]; });
+    render({ keepScroll: true });
+  };
+}
+
+function renderRecall(el, lesson, lab, labIdx) {
+  const st = labState(lab.id);
+  const draft = store.get().drafts[lab.id];
+  el.innerHTML = `
+    <details class="spec" ${st.passed ? '' : 'open'}><summary>What to implement (${lab.steps.length} steps)</summary>
+      <ol>${lab.steps.map((x) => `<li>${inline(x)}</li>`).join('')}</ol>
+    </details>
+    <div class="editor-card">
+      <div class="editor-bar">
+        <div class="left"><span class="file">solution.py</span>${pyStateHTML()}</div>
+        <div class="right">
+          <button class="btn quiet" data-act="hint">Hint</button>
+          <button class="btn quiet" data-act="peek">Peek at answer</button>
+          <button class="btn quiet" data-act="reset">Reset</button>
+          <button class="btn quiet" data-act="stop" hidden>Stop</button>
+          <button class="btn" data-act="run">Run</button>
+          <button class="btn primary" data-act="test">Run tests</button>
+        </div>
+      </div>
+      <div class="editor-host"></div>
+      <div class="output" aria-live="polite"></div>
+    </div>
+    <div class="peek-strip">${st.peeks ? `Peeked ${st.peeks} time${st.peeks > 1 ? 's' : ''} on this lab. ` : ''}<span class="kbd">Ctrl/⌘ Enter</span> runs tests.</div>
+    <div class="hint-box"></div>
+    <div id="win"></div>`;
+
+  const out = $('.output', el);
+  const editor = createEditor($('.editor-host', el), draft ?? lab.starter.trim() + '\n', {
+    onChange: (code) => store.update((s) => { s.drafts[lab.id] = code; }),
+    onRunTests: () => act('test'),
+  });
+  cleanup.push(() => editor.destroy());
+
+  let hints = 0;
+  const hintBtn = $('[data-act="hint"]', el);
+  const paintHint = () => {
+    hintBtn.textContent = hints >= lab.hints.length ? 'No more hints' : `Hint (${lab.hints.length - hints} left)`;
+    hintBtn.disabled = hints >= lab.hints.length;
+  };
+  paintHint();
+
+  const showWin = () => {
+    const nextLab = lesson.labs[labIdx + 1];
+    const s = labState(lab.id);
+    $('#win', el).innerHTML = `
+      <div class="win">
+        <div><b>${s.mastered ? 'Recalled from memory ✓' : 'Tests pass ✓'}</b><div class="muted small">${s.mastered ? 'No peeks. That is how it sticks.' : 'You peeked this time. Come back tomorrow and recall it cold.'}</div></div>
+        <div class="row">
+          <button class="btn quiet" data-act="again">Start over</button>
+          ${nextLab ? `<a class="btn primary" href="#/l/${lesson.id}/practice/${labIdx + 1}">Next lab →</a>` : `<a class="btn primary" href="#/l/${lesson.id}/quiz">Take the quiz →</a>`}
+        </div>
+      </div>`;
+    $('[data-act="again"]', el).onclick = () => act('again');
+  };
+  const busy = (b) => {
+    $$('[data-act="run"],[data-act="test"]', el).forEach((x) => { x.disabled = b; });
+    $('[data-act="stop"]', el).hidden = !b;
+  };
+
+  async function act(kind) {
+    if (kind === 'hint') {
+      if (hints >= lab.hints.length) return;
+      $('.hint-box', el).insertAdjacentHTML('beforeend', `<div class="callout warn small"><b>Hint ${hints + 1}.</b> ${inline(lab.hints[hints])}</div>`);
+      hints++;
+      paintHint();
+      return;
     }
-    section.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-act]');
-      if (b && b.dataset.act !== 'load-solution') act(b.dataset.act);
-    });
+    if (kind === 'peek') {
+      if (!confirm('Peeking shows the answer again and resets your code to the starter. Continue?')) return;
+      setLab(lab, { stage: 'study', peeks: (labState(lab.id).peeks || 0) + 1, attemptPeeked: true });
+      store.update((s) => { delete s.drafts[lab.id]; });
+      render({ keepScroll: true });
+      return;
+    }
+    if (kind === 'reset' || kind === 'again') {
+      if (kind === 'reset' && !confirm('Clear your code back to the starter?')) return;
+      editor.setValue(lab.starter.trim() + '\n');
+      store.update((s) => { delete s.drafts[lab.id]; });
+      if (kind === 'again') setLab(lab, { attemptPeeked: false });
+      out.innerHTML = '';
+      $('#win', el).innerHTML = '';
+      editor.focus();
+      return;
+    }
+    if (kind === 'stop') { py.stop(); return; }
+    busy(true);
+    out.innerHTML = `<div class="muted small">${py.status === 'ready' ? 'Running…' : 'Starting Python (first time takes a few seconds)…'}</div>`;
+    try {
+      if (kind === 'run') {
+        renderResult(out, await py.runScript(editor.getValue()), 'script');
+      } else {
+        const r = await py.runLab(editor.getValue(), lab.tests);
+        renderResult(out, r, 'lab');
+        if (r.ok) {
+          const prev = labState(lab.id);
+          const clean = !prev.attemptPeeked;
+          setLab(lab, { passed: true, at: Date.now(), mastered: prev.mastered || clean });
+          toast(clean ? 'Recalled from memory ✓' : 'Tests pass ✓');
+          renderShell(parseRoute());
+          showWin();
+        }
+      }
+    } catch (err) {
+      out.innerHTML = `<div class="res-head bad">${esc(err.message)}</div>${py.status === 'error' ? '<p class="muted small">Python could not load. It is downloaded from cdn.jsdelivr.net; check your connection and try again.</p>' : ''}`;
+    } finally {
+      busy(false);
+    }
+  }
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (b && b.closest('.editor-bar')) act(b.dataset.act);
   });
   py.ensureReady().catch(() => {});
 }
 
+// ---------- quiz ----------
 function renderQuiz(body, lesson) {
-  const saved = store.get().quizzes[lesson.id]?.answers || {};
-  const answers = { ...saved };
+  const answers = { ...(store.get().quizzes[lesson.id]?.answers || {}) };
   const draw = () => {
     const answered = Object.keys(answers).length;
     const correct = lesson.quiz.filter((q, i) => answers[i] === q.answer).length;
@@ -404,110 +466,96 @@ function renderQuiz(body, lesson) {
         const a = answers[i];
         const locked = a !== undefined;
         return `
-        <div class="card q">
-          <h3>${i + 1}. ${inline(q.q)}</h3>
-          ${q.options.map((o, j) => {
-            let cls = '';
-            if (locked && j === q.answer) cls = 'right';
-            else if (locked && j === a) cls = 'wrong';
-            return `<button class="opt ${cls}" data-q="${i}" data-o="${j}" ${locked ? 'disabled' : ''}>${inline(o)}</button>`;
-          }).join('')}
-          ${locked ? `<div class="why"><b>${a === q.answer ? '✓ Correct.' : '✗ Not quite.'}</b> ${inline(q.why)}</div>` : ''}
+        <div class="q">
+          <h3><span class="qn">${i + 1}.</span>${inline(q.q)}</h3>
+          ${q.options.map((o, j) => `<button class="opt ${locked && j === q.answer ? 'right' : locked && j === a ? 'wrong' : ''}" data-q="${i}" data-o="${j}" ${locked ? 'disabled' : ''}><span class="k">${'ABCD'[j]}</span><span>${inline(o)}</span></button>`).join('')}
+          ${locked ? `<div class="why"><b>${a === q.answer ? 'Correct.' : 'Not quite.'}</b> ${inline(q.why)}</div>` : ''}
         </div>`;
       }).join('')}
-      <div class="row" style="justify-content:space-between">
-        <span class="muted">${answered}/${lesson.quiz.length} answered · ${correct} correct</span>
-        ${answered ? '<button class="btn small ghost" id="retry">↺ Retry quiz</button>' : ''}
-      </div>
-      ${answered === lesson.quiz.length ? nextBanner(`Quiz done · ${correct}/${lesson.quiz.length}`, 'Next: run the real project and tick the production checklist', `#/l/${lesson.id}/ship`, 'Ship it') : ''}
-    `;
-    body.querySelectorAll('.opt').forEach((b) => b.addEventListener('click', () => {
+      ${answered === lesson.quiz.length
+        ? `${nextBlock(`You got ${correct} of ${lesson.quiz.length}`, 'Next: run the real project and tick the checklist', `#/l/${lesson.id}/ship`, 'Continue')}
+           <p style="margin-top:12px"><button class="btn quiet" id="retry">Retake quiz</button></p>`
+        : `<p class="muted small">${answered} of ${lesson.quiz.length} answered</p>`}`;
+    $$('.opt', body).forEach((b) => b.addEventListener('click', () => {
       answers[b.dataset.q] = +b.dataset.o;
       const ans = Object.keys(answers).length;
       const cor = lesson.quiz.filter((q, i) => answers[i] === q.answer).length;
       store.update((s) => { s.quizzes[lesson.id] = { answers: { ...answers }, answered: ans, correct: cor }; });
-      if (ans === lesson.quiz.length) { renderSidebar(parseRoute()); toast(`Quiz complete: ${cor}/${lesson.quiz.length}`); }
+      if (ans === lesson.quiz.length) renderShell(parseRoute());
       draw();
     }));
-    const retry = $('#retry');
+    const retry = $('#retry', body);
     if (retry) retry.onclick = () => {
       Object.keys(answers).forEach((k) => delete answers[k]);
       store.update((s) => { delete s.quizzes[lesson.id]; });
-      renderSidebar(parseRoute());
+      renderShell(parseRoute());
       draw();
     };
   };
   draw();
 }
 
-function renderShip(body, lesson, next) {
+// ---------- ship ----------
+function renderShip(body, lesson) {
   const s = store.get();
-  const dir = lesson.repo.split('/').slice(-2).join('/');
-  const repoRoot = lesson.repo.split('/tree/')[0];
+  const next = LESSONS[LESSONS.indexOf(lesson) + 1];
+  const [repoRoot, path] = lesson.repo.split('/tree/main/');
   const checks = s.checklist[lesson.id] || {};
   const done = !!s.done[lesson.id];
   body.innerHTML = `
-    <h2 style="margin-top:0">Run the reference project</h2>
-    <p class="muted">The full Dockerized service (FastAPI, dashboard, tests) lives in the reference repo. About 10 minutes, with Docker installed.</p>
+    <p class="muted">The full Dockerized service (FastAPI, dashboard, tests) is in the reference repo. About 10 minutes if Docker is installed.</p>
     <pre class="code"><code>git clone ${esc(repoRoot)}.git
-cd ${esc(repoRoot.split('/').pop())}/${esc(dir)}
-./start.sh        # build and start the container + dashboard
-./demo.sh         # drive demo traffic; dashboard metrics should leave zero
-./run_tests.sh    # pytest + smoke checks
-./cleanup.sh      # stop and remove containers/images</code></pre>
-    <p><a href="${lesson.repo}" target="_blank" rel="noopener">↗ Open ${esc(dir)} on GitHub</a></p>
-
+cd ${esc(repoRoot.split('/').pop())}/${esc(path)}
+./start.sh       # start the service + dashboard
+./demo.sh        # send demo traffic; metrics should move
+./run_tests.sh   # tests + smoke checks
+./cleanup.sh     # stop and remove everything</code></pre>
     <h2>Production checklist</h2>
-    <div class="card">
-      ${lesson.checklist.map((c, i) => `<label class="checkline"><input type="checkbox" data-i="${i}" ${checks[i] ? 'checked' : ''}/><span>${inline(c)}</span></label>`).join('')}
-    </div>
-
-    <h2>My notes</h2>
-    <textarea class="notes" id="notes" placeholder="What surprised you? What would you change in production? Saved automatically.">${esc(s.notes[lesson.id] || '')}</textarea>
-
-    <div class="card next-banner">
-      <div><div class="label">${done ? 'Lesson complete' : 'Finish'}</div><b>${done ? `Lesson ${lesson.num} is marked complete ✓` : 'Mark this lesson complete'}</b></div>
+    <div>${lesson.checklist.map((c, i) => `<label class="checkline"><input type="checkbox" data-i="${i}" ${checks[i] ? 'checked' : ''}/><span>${inline(c)}</span></label>`).join('')}</div>
+    <h2>Your notes</h2>
+    <textarea class="notes-box" id="notes" placeholder="What surprised you? What would you do differently in production?">${esc(s.notes[lesson.id] || '')}</textarea>
+    <div class="next">
+      <div><div class="label">${done ? 'Done' : 'Finish'}</div><b>${done ? `Lesson ${lesson.num} complete ✓` : 'Mark this lesson complete'}</b></div>
       <div class="row">
-        <button class="btn ${done ? 'ghost' : 'ok'}" id="markDone">${done ? 'Unmark' : '✓ Mark complete'}</button>
-        ${next ? `<a class="btn primary" href="#/l/${next.id}">Next: Lesson ${next.num} →</a>` : '<a class="btn primary" href="#/">Course home →</a>'}
+        <button class="btn ${done ? 'quiet' : 'ok'}" id="markDone">${done ? 'Mark incomplete' : 'Mark complete'}</button>
+        ${next ? `<a class="btn primary" href="#/l/${next.id}">Lesson ${next.num} →</a>` : '<a class="btn primary" href="#/">Home →</a>'}
       </div>
     </div>`;
-  body.querySelectorAll('.checkline input').forEach((cb) => cb.addEventListener('change', () => {
+  $$('.checkline input', body).forEach((cb) => cb.addEventListener('change', () => {
     store.update((st) => { (st.checklist[lesson.id] ||= {})[cb.dataset.i] = cb.checked; });
   }));
   let t;
-  $('#notes').addEventListener('input', (e) => {
+  $('#notes', body).addEventListener('input', (e) => {
     clearTimeout(t);
     t = setTimeout(() => store.update((st) => { st.notes[lesson.id] = e.target.value; }), 300);
   });
-  $('#markDone').onclick = () => {
-    store.update((st) => { st.done[lesson.id] = !done; if (done) delete st.done[lesson.id]; });
+  $('#markDone', body).onclick = () => {
+    store.update((st) => { if (done) delete st.done[lesson.id]; else st.done[lesson.id] = true; });
     if (!done) toast(`Lesson ${lesson.num} complete ✓`);
-    render();
+    render({ keepScroll: true });
   };
 }
 
 // ---------- playground ----------
-const PLAYGROUND_DEFAULT = `# Scratchpad: stdlib Python runs here (Pyodide). Top-level await works.
-import asyncio, json, re
+const PLAYGROUND_DEFAULT = `# Scratchpad. Standard-library Python runs here; top-level await works.
+import asyncio
 
 async def tool(name, delay):
     await asyncio.sleep(delay)
-    return {"tool": name, "ms": int(delay * 1000)}
+    return f"{name} done in {int(delay * 1000)} ms"
 
-results = await asyncio.gather(tool("search", 0.2), tool("lookup", 0.1))
-print(json.dumps(results, indent=2))
+for line in await asyncio.gather(tool("search", 0.2), tool("lookup", 0.1)):
+    print(line)
 `;
 
 function renderPlayground() {
   main.innerHTML = `
-  <div class="page">
-    <div class="eyebrow">Sandbox</div>
-    <h1>Python playground</h1>
-    <p class="lede">Try ideas from any lesson. Standard library only. Code is saved in this browser.</p>
-    <div class="editor-wrap">
-      <div class="editor-bar"><span class="file">scratch.py</span>
-        <div class="row"><button class="btn small ghost" id="pgReset">↺ Reset</button><button class="btn small ghost" id="pgStop" hidden>■ Stop</button><button class="btn small primary" id="pgRun">▶ Run</button></div>
+  <div class="page wide">
+    <h1>Playground</h1>
+    <p class="lede" style="margin-bottom:24px">Try ideas from any lesson. Your code is saved in this browser.</p>
+    <div class="editor-card">
+      <div class="editor-bar"><div class="left"><span class="file">scratch.py</span>${pyStateHTML()}</div>
+        <div class="right"><button class="btn quiet" id="pgReset">Reset</button><button class="btn quiet" id="pgStop" hidden>Stop</button><button class="btn primary" id="pgRun">Run</button></div>
       </div>
       <div class="editor-host"></div>
       <div class="output"></div>
@@ -522,9 +570,9 @@ function renderPlayground() {
   async function run() {
     $('#pgRun').disabled = true;
     $('#pgStop').hidden = false;
-    out.innerHTML = '<div class="muted">Running…</div>';
+    out.innerHTML = '<div class="muted small">Running…</div>';
     try { renderResult(out, await py.runScript(ed.getValue()), 'script'); }
-    catch (err) { out.innerHTML = `<div class="result-head bad">✗ ${esc(err.message)}</div>`; }
+    catch (err) { out.innerHTML = `<div class="res-head bad">${esc(err.message)}</div>`; }
     finally { $('#pgRun').disabled = false; $('#pgStop').hidden = true; }
   }
   $('#pgRun').onclick = run;
@@ -533,29 +581,23 @@ function renderPlayground() {
   py.ensureReady().catch(() => {});
 }
 
-// ---------- progress & data ----------
+// ---------- progress & backup ----------
 function renderProgress() {
   const cp = courseProgress();
   main.innerHTML = `
   <div class="page">
-    <div class="eyebrow">Your data</div>
-    <h1>Progress & data</h1>
-    <div class="stats">
-      <div class="stat"><b>${cp.done}/${cp.total}</b><span>lessons</span></div>
-      <div class="stat"><b>${cp.labsPassed}/${cp.labsTotal}</b><span>labs</span></div>
-      <div class="stat"><b>${Object.keys(store.get().quizzes).length}</b><span>quizzes taken</span></div>
-      <div class="stat"><b>${Object.values(store.get().notes).filter(Boolean).length}</b><span>lessons with notes</span></div>
-    </div>
+    <h1>Progress & backup</h1>
+    <p class="stats-line" style="margin-bottom:24px"><b>${cp.done}</b>/${cp.total} lessons · <b>${cp.labsPassed}</b>/${cp.labsTotal} labs passed · <b>${cp.mastered}</b> recalled with no peeks</p>
     <div class="table-wrap"><table>
-      <thead><tr><th>Lesson</th><th>Labs</th><th>Quiz</th><th>Status</th></tr></thead>
-      <tbody>${LESSONS.map((l) => { const p = lessonProgress(l); return `<tr><td><a href="#/l/${l.id}">${l.num}. ${esc(l.title)}</a></td><td>${p.labsPassed}/${p.labsTotal}</td><td>${p.quizDone ? `${p.quiz.correct}/${l.quiz.length}` : '–'}</td><td>${p.done ? '<span class="tag ok">✓ done</span>' : p.pct ? 'in progress' : '–'}</td></tr>`; }).join('')}</tbody>
+      <thead><tr><th>Lesson</th><th>Labs</th><th>Quiz</th><th></th></tr></thead>
+      <tbody>${LESSONS.map((l) => { const p = lessonProgress(l); return `<tr><td><a href="#/l/${l.id}">${l.num}. ${esc(l.title)}</a></td><td>${p.labsPassed}/${p.labsTotal}</td><td>${p.quizDone ? `${p.quiz.correct}/${l.quiz.length}` : '–'}</td><td>${p.done ? '<span class="badge ok">done</span>' : ''}</td></tr>`; }).join('')}</tbody>
     </table></div>
     <h2>Backup</h2>
-    <p class="muted">Progress, drafts and notes live in this browser's localStorage. Export them to move to another device.</p>
+    <p class="muted">Everything is stored in this browser. Export it to move to another device.</p>
     <div class="row">
-      <button class="btn" id="exp">⤓ Export JSON</button>
-      <label class="btn">⤒ Import JSON<input type="file" accept="application/json" id="imp" hidden /></label>
-      <button class="btn ghost" id="rst" style="color:var(--bad)">Reset all progress</button>
+      <button class="btn" id="exp">Export JSON</button>
+      <label class="btn">Import JSON<input type="file" accept="application/json" id="imp" hidden /></label>
+      <button class="btn quiet" id="rst" style="color:var(--bad)">Reset everything</button>
     </div>
   </div>`;
   $('#exp').onclick = () => {

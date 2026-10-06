@@ -847,6 +847,14 @@ class SemanticCache:
     @property
     def hit_rate(self):
         raise NotImplementedError
+if __name__ == "__main__":
+    t = {"now": 0}
+    c = SemanticCache(ttl=10, max_size=2, clock=lambda: t["now"])
+    c.set("What is RBAC?", "Role-based access control")
+    print("hit:", c.get("  what is rbac? "))
+    t["now"] = 11
+    print("after ttl:", c.get("what is rbac?"))
+    print(f"hits={c.hits} misses={c.misses} evictions={c.evictions} hit_rate={c.hit_rate:.0%}")
 `,
         solution: py`
 import time
@@ -887,6 +895,14 @@ class SemanticCache:
     def hit_rate(self):
         total = self.hits + self.misses
         return self.hits / total if total else 0.0
+if __name__ == "__main__":
+    t = {"now": 0}
+    c = SemanticCache(ttl=10, max_size=2, clock=lambda: t["now"])
+    c.set("What is RBAC?", "Role-based access control")
+    print("hit:", c.get("  what is rbac? "))
+    t["now"] = 11
+    print("after ttl:", c.get("what is rbac?"))
+    print(f"hits={c.hits} misses={c.misses} evictions={c.evictions} hit_rate={c.hit_rate:.0%}")
 `,
         tests: py`
 def _c(**kw):

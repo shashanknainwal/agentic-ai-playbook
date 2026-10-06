@@ -30,14 +30,14 @@
     <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open navigation">☰</button>
     <a class="brand" href="#/"><span class="brand-mark">A</span><span>Agentic AI Playbook</span></a>
     <span class="spacer"></span>
-    <span class="pill hide-sm" id="progressPill">0% complete</span>
-    <span class="pill" id="pyStatus" title="In-browser Python (Pyodide)"><span class="dot"></span><span class="txt">Python idle</span></span>
-    <button class="icon-btn" id="themeBtn" aria-label="Toggle theme">◐</button>
+    <div class="top-progress" id="topProgress"></div>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle theme"></button>
   </header>
   <div class="layout">
     <nav class="sidebar" id="sidebar" aria-label="Course navigation"></nav>
     <main id="main" tabindex="-1"></main>
   </div>
+  <div class="scrim" id="scrim"></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><p style="padding:24px">This course needs JavaScript to run Python in your browser.</p></noscript>
 </body>

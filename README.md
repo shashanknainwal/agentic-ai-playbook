@@ -7,7 +7,7 @@ Each lesson has four tabs:
 | Tab | What you do | Time |
 |---|---|---|
 | **Learn** | Problem, request flow, core concepts, insights, common mistakes, real examples | ~10 min |
-| **Build** | Implement the core component in the editor until the tests go green (`Ctrl/⌘+Enter`) | 15–30 min per lab |
+| **Practice** | **Study** a worked answer with line-by-line notes, then **write it from memory** with the answer hidden until the tests go green (`Ctrl/⌘+Enter`). Peeking resets your code; a pass with no peeks counts as *recalled* | 15–30 min per lab |
 | **Quiz** | 3 "why" questions, each with an explanation | ~3 min |
 | **Ship** | Run the Dockerized reference project, tick the production checklist, write notes | ~10 min |
 
@@ -50,16 +50,16 @@ At runtime the site loads Pyodide from `cdn.jsdelivr.net` and CodeMirror from `c
 Lessons are plain data in `js/content/m1.js` … `m7.js`. To add Lesson 27:
 
 1. Append a lesson object to a module file, or create `m8.js` and register it in `js/content/index.js`. Copy any existing lesson as a template.
-2. For each lab, write `starter`, `solution`, and `tests`. Tests are `def test_*()` functions (they can be `async`), and the first line of the docstring is the label shown in the UI. Put demo code under `if __name__ == "__main__":`. It runs on **Run** but not during tests.
-3. Verify: `node scripts/verify-labs.mjs l27`. This checks that the solution passes and the starter fails.
+2. For each lab, write `starter`, `solution`, and `tests`, plus 3–5 study notes in `js/content/notes.js` (each note's `at` is a substring of the solution line it explains). Tests are `def test_*()` functions (they can be `async`), and the first line of the docstring is the label shown in the UI. Put demo code under `if __name__ == "__main__":`. It runs on **Run** but not during tests.
+3. Verify: `node scripts/verify-labs.mjs l27`. This checks that the solution passes, the starter loads but fails, the solution's demo (the **Run** button) prints output, and every note matches a real line.
 
 Labs use the standard library only, so they load fast in Pyodide. Pyodide has no threads or subprocesses, so labs model concurrency with `asyncio`.
 
 ## Checks
 
 ```bash
-node scripts/verify-labs.mjs          # all labs: solution passes, starter fails (uses local python3)
-# browser smoke test, with every lab solution run inside real Pyodide:
+node scripts/verify-labs.mjs          # all labs: solution passes, starter fails, demo runs, notes match (local python3)
+# browser test: study → recall flow, plus every lab's tests and demo inside real Pyodide:
 npm i --prefix /tmp/pw pyodide@0.26.4 codemirror@5.65.16
 PYODIDE_DIR=/tmp/pw/node_modules/pyodide CM_DIR=/tmp/pw/node_modules/codemirror node scripts/e2e.mjs
 ```

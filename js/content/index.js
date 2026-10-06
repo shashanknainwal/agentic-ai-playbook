@@ -6,6 +6,7 @@ import m4 from './m4.js';
 import m5 from './m5.js';
 import m6 from './m6.js';
 import m7 from './m7.js';
+import { NOTES } from './notes.js';
 
 export const MODULES = [
   { id: 'kernel', num: 1, title: 'The Secure Agent Kernel', blurb: 'Perimeter, tools and memory: the core every later lesson extends.', lessons: m1 },
@@ -16,6 +17,8 @@ export const MODULES = [
   { id: 'improve', num: 6, title: 'Continuous Improvement', blurb: 'Prompt optimisation, debate, knowledge graphs and the full LLMOps loop.', lessons: m6 },
   { id: 'enterprise', num: 7, title: 'Enterprise Production', blurb: 'Kubernetes, autoscaling, SOC 2, HIPAA and disaster recovery.', lessons: m7 },
 ];
+
+for (const m of MODULES) for (const l of m.lessons) for (const lab of l.labs) lab.notes = NOTES[lab.id] || [];
 
 export const LESSONS = MODULES.flatMap((m) => m.lessons.map((l) => ({ ...l, module: m })));
 export const lessonById = (id) => LESSONS.find((l) => l.id === id);
