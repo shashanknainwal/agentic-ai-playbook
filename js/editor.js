@@ -2,10 +2,17 @@
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export function createEditor(host, value, { onChange, onRunTests } = {}) {
-  let debounce;
+  let debounce = null;
+  let pending = null;
+  const flush = () => {
+    clearTimeout(debounce);
+    debounce = null;
+    if (pending) { const get = pending; pending = null; onChange && onChange(get()); }
+  };
   const changed = (get) => {
     clearTimeout(debounce);
-    debounce = setTimeout(() => onChange && onChange(get()), 250);
+    pending = get;
+    debounce = setTimeout(flush, 250);
   };
 
   if (window.CodeMirror) {
@@ -33,7 +40,8 @@ export function createEditor(host, value, { onChange, onRunTests } = {}) {
       getValue: () => cm.getValue(),
       setValue: (v) => cm.setValue(v),
       focus: () => cm.focus(),
-      destroy: () => clearTimeout(debounce),
+      flush,
+      destroy: flush,
     };
   }
 
@@ -57,7 +65,8 @@ export function createEditor(host, value, { onChange, onRunTests } = {}) {
     getValue: () => ta.value,
     setValue: (v) => { ta.value = v; changed(() => ta.value); },
     focus: () => ta.focus(),
-    destroy: () => clearTimeout(debounce),
+    flush,
+    destroy: flush,
   };
 }
 

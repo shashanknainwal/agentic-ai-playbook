@@ -208,7 +208,9 @@ details.more > summary::-webkit-details-marker { display: none; }
 .lab-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .lab-title h2 { margin: 0 0 6px; font-size: 22px; }
 .steps { display: flex; align-items: center; gap: 10px; margin: 22px 0 22px; flex-wrap: wrap; }
-.step { display: inline-flex; align-items: center; gap: 8px; color: var(--faint); font-size: 14px; font-weight: 550; }
+.step { display: inline-flex; align-items: center; gap: 8px; color: var(--faint); font-size: 14px; font-weight: 550; padding: 6px 10px 6px 6px; margin: -6px 0; border-radius: 99px; }
+.step:not([aria-current]):hover { background: var(--surface-2); color: var(--text); }
+.step[aria-current] { cursor: default; }
 .step .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; border: 1.5px solid var(--line); }
 .step.active { color: var(--text); }
 .step.active .n { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }

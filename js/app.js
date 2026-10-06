@@ -297,9 +297,9 @@ function renderPractice(body, lesson, route) {
       </div>
     </div>
     <div class="steps">
-      <span class="step ${stepCls('study')}"><span class="n">${stepCls('study') === 'done' ? '✓' : 1}</span>Study the answer</span>
+      <button class="step ${stepCls('study')}" data-step="study" ${stage === 'study' ? 'aria-current="step"' : ''} title="${stage === 'study' ? 'You are here' : st.passed ? 'Review the worked answer' : 'Going back counts as a peek and resets your code'}"><span class="n">${stepCls('study') === 'done' ? '✓' : 1}</span>Study the answer</button>
       <span class="step-sep"></span>
-      <span class="step ${stepCls('recall')}"><span class="n">${stepCls('recall') === 'done' ? '✓' : 2}</span>Write it from memory</span>
+      <button class="step ${stepCls('recall')}" data-step="recall" ${stage === 'recall' ? 'aria-current="step"' : ''} title="${stage === 'recall' ? 'You are here' : 'Hide the answer and write it yourself'}"><span class="n">${stepCls('recall') === 'done' ? '✓' : 2}</span>Write it from memory</button>
     </div>
     <div id="stage"></div>`;
 
@@ -307,9 +307,35 @@ function renderPractice(body, lesson, route) {
     location.hash = `#/l/${lesson.id}/practice/${b.dataset.lab}`;
   }));
 
+  $$('[data-step]', body).forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.step === stage) return;
+    if (b.dataset.step === 'recall') goRecall(lab);
+    else goStudy(lab);
+  }));
+
   const stageEl = $('#stage');
   if (stage === 'study') renderStudy(stageEl, lesson, lab, labIdx);
   else renderRecall(stageEl, lesson, lab, labIdx);
+}
+
+// Study → Recall always starts from a clean starter.
+function goRecall(lab) {
+  setLab(lab, { stage: 'recall' });
+  if (!labState(lab.id).passed) store.update((s) => { delete s.drafts[lab.id]; });
+  render({ keepScroll: true });
+}
+
+// Recall → Study is free once the lab is passed; before that it is a peek.
+function goStudy(lab) {
+  if (labState(lab.id).passed) {
+    setLab(lab, { stage: 'study' });
+    render({ keepScroll: true });
+    return;
+  }
+  if (!confirm('Going back to the answer counts as a peek and resets your code to the starter. Continue?')) return;
+  setLab(lab, { stage: 'study', peeks: (labState(lab.id).peeks || 0) + 1, attemptPeeked: true });
+  store.update((s) => { delete s.drafts[lab.id]; });
+  render({ keepScroll: true });
 }
 
 function renderStudy(el, lesson, lab) {
@@ -333,11 +359,7 @@ function renderStudy(el, lesson, lab) {
     li.classList.add('focus');
     viewer.focus(Number(li.dataset.line));
   }));
-  $('#ready', el).onclick = () => {
-    setLab(lab, { stage: 'recall' });
-    store.update((s) => { delete s.drafts[lab.id]; });
-    render({ keepScroll: true });
-  };
+  $('#ready', el).onclick = () => goRecall(lab);
 }
 
 function renderRecall(el, lesson, lab, labIdx) {
@@ -407,13 +429,7 @@ function renderRecall(el, lesson, lab, labIdx) {
       paintHint();
       return;
     }
-    if (kind === 'peek') {
-      if (!confirm('Peeking shows the answer again and resets your code to the starter. Continue?')) return;
-      setLab(lab, { stage: 'study', peeks: (labState(lab.id).peeks || 0) + 1, attemptPeeked: true });
-      store.update((s) => { delete s.drafts[lab.id]; });
-      render({ keepScroll: true });
-      return;
-    }
+    if (kind === 'peek') { goStudy(lab); return; }
     if (kind === 'reset' || kind === 'again') {
       if (kind === 'reset' && !confirm('Clear your code back to the starter?')) return;
       editor.setValue(lab.starter.trim() + '\n');
@@ -425,6 +441,7 @@ function renderRecall(el, lesson, lab, labIdx) {
       return;
     }
     if (kind === 'stop') { py.stop(); return; }
+    editor.flush();
     busy(true);
     out.innerHTML = `<div class="muted small">${py.status === 'ready' ? 'Running…' : 'Starting Python (first time takes a few seconds)…'}</div>`;
     try {
