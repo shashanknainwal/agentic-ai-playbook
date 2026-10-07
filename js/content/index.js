@@ -7,6 +7,10 @@ import m5 from './m5.js';
 import m6 from './m6.js';
 import m7 from './m7.js';
 import { NOTES } from './notes.js';
+import e1 from './explain-1.js';
+import e2 from './explain-2.js';
+import e3 from './explain-3.js';
+export { GLOSSARY } from './glossary.js';
 
 export const MODULES = [
   { id: 'kernel', num: 1, title: 'The Secure Agent Kernel', blurb: 'Perimeter, tools and memory: the core every later lesson extends.', lessons: m1 },
@@ -18,7 +22,13 @@ export const MODULES = [
   { id: 'enterprise', num: 7, title: 'Enterprise Production', blurb: 'Kubernetes, autoscaling, SOC 2, HIPAA and disaster recovery.', lessons: m7 },
 ];
 
-for (const m of MODULES) for (const l of m.lessons) for (const lab of l.labs) lab.notes = NOTES[lab.id] || [];
+const EXPLAIN = { ...e1, ...e2, ...e3 };
+for (const m of MODULES) {
+  for (const l of m.lessons) {
+    l.explain = EXPLAIN[l.id] || null;
+    for (const lab of l.labs) lab.notes = NOTES[lab.id] || [];
+  }
+}
 
 export const LESSONS = MODULES.flatMap((m) => m.lessons.map((l) => ({ ...l, module: m })));
 export const lessonById = (id) => LESSONS.find((l) => l.id === id);

@@ -3,6 +3,7 @@ import { md, inline } from './md.js';
 import { store } from './store.js';
 import * as py from './py.js';
 import { createEditor, createViewer } from './editor.js';
+import { linkTerms } from './terms.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -220,17 +221,26 @@ const nextBlock = (label, title, href, cta) =>
 function renderLearn(body, lesson) {
   const idx = LESSONS.indexOf(lesson);
   const prev = LESSONS[idx - 1];
+  const ex = lesson.explain || { build: [], examples: [] };
   body.innerHTML = `
+    ${ex.plain ? `<div class="plain"><div class="plain-label">In plain English</div><p>${inline(ex.plain)}</p></div>` : ''}
     ${md(lesson.summary)}
-    <h2>What you'll build</h2>
-    <ul class="list-ok">${lesson.build.map((b) => `<li>${inline(b)}</li>`).join('')}</ul>
-    <h2>Why it matters</h2>
+    <h2>What you'll build, and why</h2>
+    <ol class="whys">${lesson.build.map((b, i) => {
+      const [why, without] = ex.build[i] || [];
+      return `<li>
+        <div class="what">${inline(b)}</div>
+        ${why ? `<p class="why-line"><span class="lbl">Why</span>${inline(why)}</p>` : ''}
+        ${without ? `<p class="why-line without"><span class="lbl">Without it</span>${inline(without)}</p>` : ''}
+      </li>`;
+    }).join('')}</ol>
+    <h2>The problem this solves</h2>
     <div class="note">${md(lesson.problem)}</div>
     ${prev ? `<p class="muted small">Builds on <a href="#/l/${prev.id}">Lesson ${prev.num}: ${esc(prev.title)}</a>.</p>` : ''}
     <h2>How a request flows</h2>
     <ol class="flow">${lesson.flow.map(([t, d]) => `<li><b>${inline(t)}</b><span>${inline(d)}</span></li>`).join('')}</ol>
     <h2>Core concepts</h2>
-    <dl class="defs">${lesson.concepts.map(([t, d]) => `<div><dt>${inline(t)}</dt><dd>${inline(d)}</dd></div>`).join('')}</dl>
+    <dl class="defs">${lesson.concepts.map(([t, d], i) => `<div><dt>${inline(t)}</dt><dd>${inline(d)}</dd>${ex.examples[i] ? `<dd class="example"><span class="lbl">Example</span>${inline(ex.examples[i])}</dd>` : ''}</div>`).join('')}</dl>
     <div class="split">
       <div><h2>Key insights</h2><ul>${lesson.insights.map((x) => `<li>${inline(x)}</li>`).join('')}</ul></div>
       <div><h2>Common mistakes</h2><ul class="list-bad">${lesson.pitfalls.map((x) => `<li>${inline(x)}</li>`).join('')}</ul></div>
@@ -239,8 +249,10 @@ function renderLearn(body, lesson) {
       <dl class="defs">${lesson.examples.map(([t, d]) => `<div><dt>${inline(t)}</dt><dd>${inline(d)}</dd></div>`).join('')}</dl>
     </details>
     ${lesson.extra ? `<details class="more"><summary>Going further</summary>${md(lesson.extra)}</details>` : ''}
+    <p class="muted small term-hint">Tip: words with a dotted underline have a plain-English definition. Hover or tap them.</p>
     ${nextBlock('Next', `Practice: ${esc(lesson.labs[0].title)}`, `#/l/${lesson.id}/practice`, 'Start practice')}
   `;
+  linkTerms(body);
 }
 
 // ---------- practice: study → recall ----------
@@ -353,6 +365,7 @@ function renderStudy(el, lesson, lab) {
         <button class="btn primary lg" id="ready">Hide the answer and start writing</button>
       </div>
     </div>`;
+  linkTerms($('.notes', el));
   const viewer = createViewer($('#answer', el), lines.join('\n'), marks);
   $$('.notes li', el).forEach((li) => li.addEventListener('click', () => {
     $$('.notes li', el).forEach((x) => x.classList.remove('focus'));
@@ -388,6 +401,7 @@ function renderRecall(el, lesson, lab, labIdx) {
     <div class="hint-box"></div>
     <div id="win"></div>`;
 
+  linkTerms($('.spec', el));
   const out = $('.output', el);
   const editor = createEditor($('.editor-host', el), draft ?? lab.starter.trim() + '\n', {
     onChange: (code) => store.update((s) => { s.drafts[lab.id] = code; }),
@@ -493,6 +507,7 @@ function renderQuiz(body, lesson) {
         ? `${nextBlock(`You got ${correct} of ${lesson.quiz.length}`, 'Next: run the real project and tick the checklist', `#/l/${lesson.id}/ship`, 'Continue')}
            <p style="margin-top:12px"><button class="btn quiet" id="retry">Retake quiz</button></p>`
         : `<p class="muted small">${answered} of ${lesson.quiz.length} answered</p>`}`;
+    linkTerms(body);
     $$('.opt', body).forEach((b) => b.addEventListener('click', () => {
       answers[b.dataset.q] = +b.dataset.o;
       const ans = Object.keys(answers).length;

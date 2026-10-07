@@ -56,6 +56,13 @@ for (const lesson of LESSONS) {
   for (const q of lesson.quiz || []) {
     if (!(q.answer >= 0 && q.answer < q.options.length)) { console.log(`✗ ${lesson.id} quiz answer out of range: ${q.q}`); failures++; }
   }
+  const ex = lesson.explain;
+  if (!ex) { console.log(`✗ ${lesson.id} has no plain-language explanation`); failures++; }
+  else {
+    if (!ex.plain || ex.plain.length < 120) { console.log(`✗ ${lesson.id} plain intro too short`); failures++; }
+    if (ex.build?.length !== lesson.build.length || ex.build.some((b) => b.length !== 2 || b.some((x) => !x || x.length < 40))) { console.log(`✗ ${lesson.id} needs [why, without] for each of ${lesson.build.length} build items (has ${ex.build?.length})`); failures++; }
+    if (ex.examples?.length !== lesson.concepts.length || ex.examples.some((x) => !x || x.length < 40)) { console.log(`✗ ${lesson.id} needs an example for each of ${lesson.concepts.length} concepts (has ${ex.examples?.length})`); failures++; }
+  }
   for (const block of (lesson.extra || '').matchAll(/```python\n([\s\S]*?)```/g)) {
     const code = block[1].replace(/^ {6}/gm, '');
     const r = py('compile', code);

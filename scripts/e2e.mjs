@@ -68,9 +68,21 @@ const setCode = (code) => page.evaluate((c) => document.querySelector('.editor-h
 const resultText = () => page.locator('.output .res-head').innerText();
 const lesson = LESSONS[0];
 
-step('learn tab');
+step('learn tab teaches the why');
 await page.goto(`${base}/#/l/${lesson.id}/learn`);
 await page.waitForSelector('.flow');
+expect(/airport security/i.test(await page.locator('.plain').innerText()), 'plain-English intro shown first');
+expect((await page.locator('.whys > li').count()) === lesson.build.length, 'every build item listed');
+expect((await page.locator('.whys .without').count()) === lesson.build.length, 'every build item has why + without-it');
+expect((await page.locator('.defs dd.example').count()) === lesson.concepts.length, 'every concept has an example');
+const termCount = await page.locator('#tabBody .term').count();
+expect(termCount >= 8, `glossary terms linked (${termCount})`);
+await page.locator('#tabBody .term', { hasText: /^stub$/i }).first().click();
+await page.waitForSelector('.term-pop:not([hidden])');
+expect(/fake stand-in/.test(await page.locator('.term-pop').innerText()), 'tapping a term shows its definition');
+await page.mouse.click(5, 300);
+await page.waitForTimeout(200);
+expect(await page.locator('.term-pop').isHidden(), 'clicking elsewhere closes it');
 await page.screenshot({ path: join(SHOTS, 'learn.png') });
 
 step('study → recall → peek → pass (lab 1)');
